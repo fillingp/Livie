@@ -248,6 +248,10 @@ export class GdmLiveAudio extends LitElement {
 
   constructor() {
     super();
+  }
+
+  connectedCallback() {
+    super.connectedCallback();
     this.initClient();
   }
 
@@ -255,11 +259,46 @@ export class GdmLiveAudio extends LitElement {
     this.nextStartTime = this.outputAudioContext.currentTime;
   }
 
+  private async getApiKey(): Promise<string | null> {
+    // 1. Try the platform's environment variable first.
+    if (process.env.API_KEY) {
+      return process.env.API_KEY;
+    }
+
+    // 2. Fallback to loading from a local .env.local file for local development.
+    try {
+      const response = await fetch('./.env.local');
+      if (response.ok) {
+        const text = await response.text();
+        const match = text.match(/^\s*GEMINI_API_KEY\s*=\s*(.*)\s*$/m);
+        if (match && match[1]) {
+          return match[1].trim();
+        }
+      }
+    } catch (e) {
+      console.error(
+        'Could not fetch or parse .env.local file. Please run from a local server.',
+        e,
+      );
+    }
+
+    return null;
+  }
+
   private async initClient() {
     this.initAudio();
 
+    const apiKey = await this.getApiKey();
+
+    if (!apiKey) {
+      this.updateError(
+        'API klíč nebyl nalezen. Pro lokální vývoj vytvořte soubor `.env.local` v kořenovém adresáři a vložte do něj: `GEMINI_API_KEY=VÁŠ_KLÍČ`',
+      );
+      return;
+    }
+
     this.client = new GoogleGenAI({
-      apiKey: process.env.API_KEY,
+      apiKey,
     });
 
     this.outputNode.connect(this.outputAudioContext.destination);
