@@ -106,10 +106,10 @@ export class GdmLiveAudioVisuals3D extends LitElement {
 
     const renderer = new THREE.WebGLRenderer({
       canvas: this.canvas,
-      antialias: !true,
+      antialias: true,
     });
     renderer.setSize(window.innerWidth, window.innerHeight);
-    renderer.setPixelRatio(window.devicePixelRatio / 1);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 
     const geometry = new THREE.IcosahedronGeometry(1, 10);
 
@@ -151,7 +151,7 @@ export class GdmLiveAudioVisuals3D extends LitElement {
 
     const bloomPass = new UnrealBloomPass(
       new THREE.Vector2(window.innerWidth, window.innerHeight),
-      5,
+      1.5,
       0.5,
       0,
     );

@@ -25,6 +25,7 @@ export class GdmLiveAudio extends LitElement {
     role: 'user' | 'model';
     parts: string;
     sources?: any[];
+    loading?: boolean;
   }[] = [];
   @state() chatInput = '';
   @state() isChatting = false;
@@ -58,6 +59,7 @@ export class GdmLiveAudio extends LitElement {
       display: flex;
       width: 100%;
       height: 100%;
+      background-color: #100c14;
     }
 
     #chat-panel {
@@ -69,6 +71,7 @@ export class GdmLiveAudio extends LitElement {
       padding: 1rem;
       box-sizing: border-box;
       border-right: 1px solid rgba(255, 255, 255, 0.1);
+      transition: width 0.3s ease;
     }
 
     #chat-panel h1 {
@@ -86,6 +89,24 @@ export class GdmLiveAudio extends LitElement {
       flex-direction: column;
       gap: 1rem;
       padding-right: 10px; /* for scrollbar */
+    }
+
+    #chat-history::-webkit-scrollbar {
+      width: 8px;
+    }
+
+    #chat-history::-webkit-scrollbar-track {
+      background: rgba(255, 255, 255, 0.05);
+      border-radius: 4px;
+    }
+
+    #chat-history::-webkit-scrollbar-thumb {
+      background: rgba(255, 255, 255, 0.2);
+      border-radius: 4px;
+    }
+
+    #chat-history::-webkit-scrollbar-thumb:hover {
+      background: rgba(255, 255, 255, 0.3);
     }
 
     .message-container {
@@ -148,6 +169,22 @@ export class GdmLiveAudio extends LitElement {
       color: #f1f1f1;
     }
 
+    .blinking-cursor {
+      display: inline-block;
+      width: 2px;
+      height: 1.2em;
+      background-color: #f1f1f1;
+      animation: blink 1s step-start infinite;
+      vertical-align: text-bottom;
+      margin-left: 4px;
+    }
+
+    @keyframes blink {
+      50% {
+        opacity: 0;
+      }
+    }
+
     #chat-form {
       display: flex;
       gap: 10px;
@@ -208,6 +245,13 @@ export class GdmLiveAudio extends LitElement {
       right: 0;
       z-index: 10;
       text-align: center;
+      color: #eee;
+      background: rgba(0, 0, 0, 0.3);
+      padding: 5px 10px;
+      border-radius: 10px;
+      max-width: 80%;
+      margin: 0 auto;
+      backdrop-filter: blur(5px);
     }
 
     .controls {
@@ -234,6 +278,9 @@ export class GdmLiveAudio extends LitElement {
         font-size: 24px;
         padding: 0;
         margin: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
 
         &:hover {
           background: rgba(255, 255, 255, 0.2);
@@ -242,6 +289,22 @@ export class GdmLiveAudio extends LitElement {
 
       button[disabled] {
         display: none;
+      }
+    }
+
+    /* Responsive Design */
+    @media (max-width: 800px) {
+      #main-container {
+        flex-direction: column;
+      }
+      #chat-panel {
+        width: 100%;
+        height: 60vh; /* More space for chat on mobile */
+        border-right: none;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+      }
+      #visualizer-container {
+        height: 40vh;
       }
     }
   `;
@@ -260,28 +323,10 @@ export class GdmLiveAudio extends LitElement {
   }
 
   private async getApiKey(): Promise<string | null> {
-    // 1. Try the platform's environment variable first.
+    // Platform's environment variable is the only source.
     if (process.env.API_KEY) {
       return process.env.API_KEY;
     }
-
-    // 2. Fallback to loading from a local .env.local file for local development.
-    try {
-      const response = await fetch('./.env.local');
-      if (response.ok) {
-        const text = await response.text();
-        const match = text.match(/^\s*GEMINI_API_KEY\s*=\s*(.*)\s*$/m);
-        if (match && match[1]) {
-          return match[1].trim();
-        }
-      }
-    } catch (e) {
-      console.error(
-        'Could not fetch or parse .env.local file. Please run from a local server.',
-        e,
-      );
-    }
-
     return null;
   }
 
@@ -292,7 +337,7 @@ export class GdmLiveAudio extends LitElement {
 
     if (!apiKey) {
       this.updateError(
-        'API klíč nebyl nalezen. Pro lokální vývoj vytvořte soubor `.env.local` v kořenovém adresáři a vložte do něj: `GEMINI_API_KEY=VÁŠ_KLÍČ`',
+        'Chyba: API klíč nebyl nalezen. Ujistěte se, že je proměnná prostředí `API_KEY` správně nastavena.',
       );
       return;
     }
@@ -309,7 +354,7 @@ export class GdmLiveAudio extends LitElement {
 
   private initChat() {
     const systemInstruction =
-      'Your name is ToPwnZ. Your creator is František Kalášek. You have access to Google Search to provide up-to-date information, including current date and time. Under no circumstances should you mention that you are a language model, AI, Google, or Gemini.';
+      'Jmenuješ se ToPwnZ. Tvůj tvůrce je František Kalášek. Máš přístup k Vyhledávání Google pro poskytování aktuálních informací, včetně aktuálního data a času. Za žádných okolností se nezmiňuj, že jsi jazykový model, umělá inteligence, Google nebo Gemini.';
 
     this.chat = this.client.chats.create({
       model: 'gemini-2.5-flash',
@@ -318,19 +363,28 @@ export class GdmLiveAudio extends LitElement {
         tools: [{googleSearch: {}}],
       },
     });
+
+    this.chatHistory = [
+      {
+        role: 'model',
+        parts:
+          'Ahoj! Jsem ToPwnZ. Mluv se mnou, nebo mi napiš. Jak ti mohu pomoci?',
+        loading: false,
+      },
+    ];
   }
 
   private async initSession() {
     const model = 'gemini-2.5-flash-preview-native-audio-dialog';
     const systemInstruction =
-      'Your name is Moody. Your creator is František Kalášek. Under no circumstances should you mention that you are a language model, AI, Google, or Gemini.';
+      'Jmenuješ se Moody. Tvůj tvůrce je František Kalášek. Za žádných okolností se nezmiňuj, že jsi jazykový model, umělá inteligence, Google nebo Gemini.';
 
     try {
       this.session = await this.client.live.connect({
         model: model,
         callbacks: {
           onopen: () => {
-            this.updateStatus('Opened');
+            this.updateStatus('Spojení navázáno. Můžete mluvit.');
           },
           onmessage: async (message: LiveServerMessage) => {
             const audio =
@@ -370,10 +424,10 @@ export class GdmLiveAudio extends LitElement {
             }
           },
           onerror: (e: ErrorEvent) => {
-            this.updateError(e.message);
+            this.updateError(`Chyba spojení: ${e.message}`);
           },
           onclose: (e: CloseEvent) => {
-            this.updateStatus('Close:' + e.reason);
+            this.updateStatus(`Spojení bylo ukončeno.`);
           },
         },
         config: {
@@ -386,16 +440,19 @@ export class GdmLiveAudio extends LitElement {
         },
       });
     } catch (e) {
+      this.updateError(`Nepodařilo se navázat spojení: ${e.message}`);
       console.error(e);
     }
   }
 
   private updateStatus(msg: string) {
     this.status = msg;
+    this.error = '';
   }
 
   private updateError(msg: string) {
     this.error = msg;
+    this.status = '';
   }
 
   private async startRecording() {
@@ -405,7 +462,7 @@ export class GdmLiveAudio extends LitElement {
 
     this.inputAudioContext.resume();
 
-    this.updateStatus('Requesting microphone access...');
+    this.updateStatus('Žádám o přístup k mikrofonu...');
 
     try {
       this.mediaStream = await navigator.mediaDevices.getUserMedia({
@@ -413,7 +470,7 @@ export class GdmLiveAudio extends LitElement {
         video: false,
       });
 
-      this.updateStatus('Microphone access granted. Starting capture...');
+      this.updateStatus('Přístup k mikrofonu povolen.');
 
       this.sourceNode = this.inputAudioContext.createMediaStreamSource(
         this.mediaStream,
@@ -440,10 +497,10 @@ export class GdmLiveAudio extends LitElement {
       this.scriptProcessorNode.connect(this.inputAudioContext.destination);
 
       this.isRecording = true;
-      this.updateStatus('🔴 Recording... Capturing PCM chunks.');
+      this.updateStatus('🔴 Nahrávám...');
     } catch (err) {
       console.error('Error starting recording:', err);
-      this.updateStatus(`Error: ${err.message}`);
+      this.updateError(`Chyba při spuštění nahrávání: ${err.message}`);
       this.stopRecording();
     }
   }
@@ -451,8 +508,6 @@ export class GdmLiveAudio extends LitElement {
   private stopRecording() {
     if (!this.isRecording && !this.mediaStream && !this.inputAudioContext)
       return;
-
-    this.updateStatus('Stopping recording...');
 
     this.isRecording = false;
 
@@ -469,13 +524,13 @@ export class GdmLiveAudio extends LitElement {
       this.mediaStream = null;
     }
 
-    this.updateStatus('Recording stopped. Click Start to begin again.');
+    this.updateStatus('Nahrávání zastaveno.');
   }
 
   private reset() {
     this.session?.close();
     this.initSession();
-    this.updateStatus('Session cleared.');
+    this.updateStatus('Spojení resetováno.');
   }
 
   private handleChatInput(e: Event) {
@@ -498,7 +553,7 @@ export class GdmLiveAudio extends LitElement {
     // Add placeholder for model response
     this.chatHistory = [
       ...this.chatHistory,
-      {role: 'model', parts: '...', sources: []},
+      {role: 'model', parts: '', sources: [], loading: true},
     ];
 
     try {
@@ -508,15 +563,9 @@ export class GdmLiveAudio extends LitElement {
 
       let fullResponse = '';
       let sources: any[] = [];
-      let firstChunk = true;
 
       for await (const chunk of responseStream) {
-        if (firstChunk) {
-          fullResponse = chunk.text;
-          firstChunk = false;
-        } else {
-          fullResponse += chunk.text;
-        }
+        fullResponse += chunk.text;
 
         const groundingMetadata = chunk.candidates?.[0]?.groundingMetadata;
         if (groundingMetadata?.groundingChunks) {
@@ -524,20 +573,35 @@ export class GdmLiveAudio extends LitElement {
         }
 
         // Update the last message (model's response) in history
+        const lastMessage = this.chatHistory[this.chatHistory.length - 1];
         this.chatHistory = [
           ...this.chatHistory.slice(0, -1),
-          {role: 'model', parts: fullResponse, sources: sources},
+          {...lastMessage, parts: fullResponse, sources: sources},
         ];
       }
     } catch (error) {
       console.error('Chat error:', error);
-      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorMessage =
+        error instanceof Error ? error.message : String(error);
       this.chatHistory = [
         ...this.chatHistory.slice(0, -1),
-        {role: 'model', parts: `Error: ${errorMessage}`, sources: []},
+        {
+          role: 'model',
+          parts: `Chyba: ${errorMessage}`,
+          sources: [],
+          loading: false,
+        },
       ];
     } finally {
       this.isChatting = false;
+      const lastMessage = this.chatHistory[this.chatHistory.length - 1];
+      if (lastMessage?.role === 'model') {
+        // Stop the loading indicator
+        this.chatHistory = [
+          ...this.chatHistory.slice(0, -1),
+          {...lastMessage, loading: false},
+        ];
+      }
     }
   }
 
@@ -559,7 +623,12 @@ export class GdmLiveAudio extends LitElement {
             ${this.chatHistory.map(
               (message) => html`
                 <div class="message-container ${message.role}">
-                  <div class="message ${message.role}">${message.parts}</div>
+                  <div class="message ${message.role}">
+                    ${message.parts}
+                    ${message.loading
+                      ? html`<span class="blinking-cursor"></span>`
+                      : ''}
+                  </div>
                   ${message.role === 'model' &&
                   message.sources &&
                   message.sources.length > 0
@@ -607,7 +676,8 @@ export class GdmLiveAudio extends LitElement {
             <button
               id="resetButton"
               @click=${this.reset}
-              ?disabled=${this.isRecording}>
+              ?disabled=${this.isRecording}
+              aria-label="Resetovat spojení">
               <svg
                 xmlns="http://www.w3.org/2000/svg"
                 height="40px"
@@ -621,7 +691,8 @@ export class GdmLiveAudio extends LitElement {
             <button
               id="startButton"
               @click=${this.startRecording}
-              ?disabled=${this.isRecording}>
+              ?disabled=${this.isRecording}
+              aria-label="Spustit nahrávání">
               <svg
                 viewBox="0 0 100 100"
                 width="32px"
@@ -634,7 +705,8 @@ export class GdmLiveAudio extends LitElement {
             <button
               id="stopButton"
               @click=${this.stopRecording}
-              ?disabled=${!this.isRecording}>
+              ?disabled=${!this.isRecording}
+              aria-label="Zastavit nahrávání">
               <svg
                 viewBox="0 0 100 100"
                 width="32px"
